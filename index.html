@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Patecord - Enhanced Edition</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="user-profile-styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700&display=swap" rel="stylesheet">
-  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.socket.io/4.8.3/socket.io.min.js" crossorigin="anonymous"></script>
 </head>
 <body data-theme="dark">
   <!-- Login Screen -->
@@ -161,6 +162,7 @@
           <button class="icon-btn" id="editProfileBtn" title="Edit Profile">✏️</button>
           <button class="icon-btn" id="statusBtn" title="Status">🟢</button>
           <button class="icon-btn" id="themeBtn" title="Toggle Theme">🌙</button>
+          <button class="icon-btn danger" id="logoutBtn" title="Logout">🚪</button>
         </div>
       </div>
     </div>
@@ -173,6 +175,7 @@
           <div class="channel-description">General discussion for everything</div>
         </div>
         <div class="header-controls">
+          <button class="icon-btn" id="viewAllUsersBtn" title="View All Users">👥</button>
           <button class="icon-btn" id="voiceBtn" title="Voice Channel">🎙️</button>
           <button class="icon-btn" id="toggleUsersBtn">👤</button>
         </div>
@@ -396,6 +399,73 @@
           </button>
         </div>
         <button class="primary-btn save-btn" onclick="confirmJoinVoice()">Join Voice</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Logout Confirmation Modal -->
+  <div class="modal" id="logoutModal">
+    <div class="modal-content logout-modal">
+      <div class="modal-header">
+        <h3>Logout</h3>
+        <button class="modal-close" onclick="closeModal('logoutModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="logout-icon">🚪</div>
+        <p class="logout-message">Are you sure you want to logout?</p>
+        <p class="logout-hint">You'll need to login again to access Patecord.</p>
+        <div class="logout-actions">
+          <button class="secondary-btn" onclick="closeModal('logoutModal')">Cancel</button>
+          <button class="danger-btn" onclick="confirmLogout()">Logout</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- User Profile Modal -->
+  <div class="modal" id="userProfileModal">
+    <div class="modal-content user-profile-modal">
+      <div class="modal-header">
+        <h3>User Profile</h3>
+        <button class="modal-close" onclick="closeModal('userProfileModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="profile-banner">
+          <div class="profile-avatar-large" id="profileAvatarLarge">😺</div>
+        </div>
+        <div class="profile-info">
+          <div class="profile-username" id="profileUsername">Username</div>
+          <div class="profile-status">
+            <span class="status-indicator online" id="profileStatusIndicator"></span>
+            <span id="profileStatus">Online</span>
+          </div>
+        </div>
+        <div class="profile-section">
+          <h4>About Me</h4>
+          <p id="profileBio">Hey there! I use Patecord.</p>
+        </div>
+        <div class="profile-section">
+          <h4>Member Since</h4>
+          <p id="profileJoinDate">Recently joined</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- All Users Modal -->
+  <div class="modal" id="allUsersModal">
+    <div class="modal-content all-users-modal">
+      <div class="modal-header">
+        <h3>All Users</h3>
+        <button class="modal-close" onclick="closeModal('allUsersModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="users-search-bar">
+          <input type="text" id="usersSearch" class="form-input" placeholder="Search users...">
+        </div>
+        <div class="all-users-list" id="allUsersList">
+          <div class="loading-users">Loading users...</div>
+        </div>
       </div>
     </div>
   </div>

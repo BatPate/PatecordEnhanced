@@ -17,6 +17,7 @@ let isMuted = false;
 let isDeafened = false;
 let voiceStream = null;
 let peerConnections = {};
+let authToken = '';
 
 const TENOR_API_KEY = 'AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ';
 const TENOR_CLIENT_KEY = 'patecord';
@@ -35,19 +36,53 @@ document.addEventListener('DOMContentLoaded', () => {
   setupLoginListeners();
 });
 
+// ==================== API HELPERS ====================
+
+async function apiCall(endpoint, options = {}) {
+  try {
+    const headers = {
+      'Content-Type': 'application/json',
+      ...options.headers
+    };
+    
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+    
+    const response = await fetch(endpoint, {
+      ...options,
+      headers
+    });
+    
+    return await response.json();
+  } catch (error) {
+    console.error('API call failed:', error);
+    return { success: false, error: 'Network error' };
+  }
+}
+
 // ==================== LOGIN SYSTEM ====================
 
-function checkLoginStatus() {
-  const savedProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-  if (savedProfile.username) {
-    username = savedProfile.username;
-    userEmail = savedProfile.email || '';
-    selectedAvatar = savedProfile.avatar || '😺';
-    userBio = savedProfile.bio || 'Hey there! I use Patecord.';
-    showMainApp();
-  } else {
-    document.getElementById('loginScreen').style.display = 'flex';
+async function checkLoginStatus() {
+  const token = localStorage.getItem('authToken');
+  if (token) {
+    const result = await apiCall('/api/auth/verify', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    if (result.success) {
+      authToken = token;
+      username = result.user.username;
+      userEmail = result.user.email;
+      selectedAvatar = result.user.avatar;
+      userBio = result.user.bio;
+      userStatus = result.user.status || 'online';
+      showMainApp();
+      return;
+    }
   }
+  
+  document.getElementById('loginScreen').style.display = 'flex';
 }
 
 function setupLoginListeners() {
@@ -84,51 +119,124 @@ function setupLoginListeners() {
   document.getElementById('registerBtn').onclick = handleRegister;
 }
 
-function handleLogin() {
-  const usernameInput = document.getElementById('loginUsername').value.trim();
-  if (!usernameInput) {
-    alert('Please enter a username');
+async function handleLogin() {
+  const emailOrUsername = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value.trim();
+  
+  if (!emailOrUsername || !password) {
+    alert('Please fill in all fields');
     return;
   }
 
-  username = usernameInput;
-  
-  const savedProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-  selectedAvatar = savedProfile.avatar || '😺';
-  userBio = savedProfile.bio || 'Hey there! I use Patecord.';
-  userEmail = savedProfile.email || '';
+  const result = await apiCall('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ emailOrUsername, password })
+  });
 
-  localStorage.setItem('userProfile', JSON.stringify({
-    username,
-    email: userEmail,
-    avatar: selectedAvatar,
-    bio: userBio
-  }));
-
-  showMainApp();
+  if (result.success) {
+    authToken = result.token;
+    username = result.user.username;
+    userEmail = result.user.email;
+    selectedAvatar = result.user.avatar;
+    userBio = result.user.bio;
+    userStatus = result.user.status || 'online';
+    
+    localStorage.setItem('authToken', authToken);
+    showMainApp();
+  } else {
+    alert(result.error || 'Login failed');
+  }
 }
 
-function handleRegister() {
+async function handleRegister() {
   const email = document.getElementById('registerEmail').value.trim();
   const user = document.getElementById('registerUsername').value.trim();
   const password = document.getElementById('registerPassword').value.trim();
 
-  if (!email || !user) {
+  if (!email || !user || !password) {
     alert('Please fill in all required fields');
     return;
   }
 
-  username = user;
-  userEmail = email;
+  const result = await apiCall('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ 
+      email, 
+      username: user, 
+      password, 
+      avatar: selectedAvatar 
+    })
+  });
 
-  localStorage.setItem('userProfile', JSON.stringify({
-    username,
-    email,
-    avatar: selectedAvatar,
-    bio: userBio
-  }));
+  if (result.success) {
+    authToken = result.token;
+    username = result.user.username;
+    userEmail = result.user.email;
+    selectedAvatar = result.user.avatar;
+    userBio = result.user.bio;
+    
+    localStorage.setItem('authToken', authToken);
+    showMainApp();
+  } else {
+    alert(result.error || 'Registration failed');
+  }
+}
 
-  showMainApp();
+function handleLogout() {
+  openModal('logoutModal');
+}
+
+function confirmLogout() {
+  // Emit disconnect to server
+  if (socket && socket.connected) {
+    socket.disconnect();
+  }
+  
+  // Clear auth data
+  localStorage.removeItem('authToken');
+  localStorage.removeItem('userProfile');
+  authToken = '';
+  username = '';
+  userEmail = '';
+  
+  // Close modal
+  closeModal('logoutModal');
+  
+  // Show logout animation
+  const mainApp = document.getElementById('mainApp');
+  mainApp.style.animation = 'fadeOut 0.3s ease';
+  
+  setTimeout(() => {
+    // Hide main app
+    mainApp.style.display = 'none';
+    mainApp.style.animation = '';
+    
+    // Show login screen
+    const loginScreen = document.getElementById('loginScreen');
+    loginScreen.style.display = 'flex';
+    loginScreen.style.animation = 'fadeIn 0.3s ease';
+    
+    // Reset form fields
+    document.getElementById('loginUsername').value = '';
+    document.getElementById('loginPassword').value = '';
+    document.getElementById('registerEmail').value = '';
+    document.getElementById('registerUsername').value = '';
+    document.getElementById('registerPassword').value = '';
+    
+    // Switch to login tab
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.login-form').forEach(form => form.classList.remove('active'));
+    document.querySelector('[data-tab="login"]').classList.add('active');
+    document.getElementById('loginForm').classList.add('active');
+  }, 300);
+}
+
+function logout() {
+  localStorage.removeItem('authToken');
+  localStorage.removeItem('userProfile');
+  authToken = '';
+  username = '';
+  location.reload();
 }
 
 function showMainApp() {
@@ -215,8 +323,10 @@ function setupEventListeners() {
   document.getElementById('statusBtn').onclick = () => openModal('statusModal');
   document.getElementById('themeBtn').onclick = toggleTheme;
   document.getElementById('editProfileBtn').onclick = openEditProfile;
+  document.getElementById('logoutBtn').onclick = handleLogout;
   document.getElementById('gifBtnInput').onclick = () => openGifPicker();
   document.getElementById('emojiBtn').onclick = () => insertEmojiIntoMessage();
+  document.getElementById('viewAllUsersBtn').onclick = openAllUsersModal;
   
   document.getElementById('toggleUsersBtn').onclick = () => {
     document.getElementById('userPanel').classList.toggle('active');
@@ -247,8 +357,8 @@ function setupEventListeners() {
   document.querySelectorAll('.avatar-option').forEach(option => {
     option.onclick = (e) => {
       document.querySelectorAll('.avatar-option').forEach(o => o.classList.remove('selected'));
-      e.currentTarget.classList.add('selected');
-      selectedAvatar = e.currentTarget.textContent;
+      e.target.classList.add('selected');
+      selectedAvatar = e.target.textContent;
     };
   });
 
@@ -256,8 +366,8 @@ function setupEventListeners() {
   document.querySelectorAll('.icon-option').forEach(option => {
     option.onclick = (e) => {
       document.querySelectorAll('.icon-option').forEach(o => o.classList.remove('selected'));
-      e.currentTarget.classList.add('selected');
-      selectedServerIcon = e.currentTarget.dataset.icon;
+      e.target.classList.add('selected');
+      selectedServerIcon = e.target.dataset.icon;
     };
   });
 
@@ -265,56 +375,43 @@ function setupEventListeners() {
   document.querySelectorAll('.reaction-category').forEach(cat => {
     cat.onclick = (e) => {
       document.querySelectorAll('.reaction-category').forEach(c => c.classList.remove('active'));
-      e.currentTarget.classList.add('active');
-      loadReactionCategory(e.currentTarget.dataset.category);
+      e.target.classList.add('active');
+      const category = e.target.dataset.category;
+      loadReactionEmojis(category);
     };
   });
-
-  // GIF search
-  document.getElementById('gifSearch').oninput = debounce((e) => {
-    searchGifs(e.target.value);
-  }, 500);
 
   // GIF categories
   document.querySelectorAll('.gif-category-btn').forEach(btn => {
     btn.onclick = (e) => {
       document.querySelectorAll('.gif-category-btn').forEach(b => b.classList.remove('active'));
-      e.currentTarget.classList.add('active');
-      searchGifs(e.currentTarget.dataset.query);
+      e.target.classList.add('active');
+      const query = e.target.dataset.query;
+      searchGifs(query);
     };
   });
 
-  // Close modals on outside click
-  document.querySelectorAll('.modal').forEach(modal => {
-    modal.onclick = (e) => {
-      if (e.target === modal) {
-        closeModal(modal.id);
-      }
-    };
-  });
-
-  // Load initial emojis
-  loadReactionCategory('smileys');
+  // GIF search
+  document.getElementById('gifSearch').oninput = debounce((e) => {
+    searchGifs(e.target.value || 'trending');
+  }, 500);
+  
+  // Users search
+  document.getElementById('usersSearch').oninput = (e) => {
+    filterUsers(e.target.value);
+  };
 }
 
+// ==================== SOCKET LISTENERS ====================
+
 function setupSocketListeners() {
-  socket.on('newMessage', (msg) => {
-    appendMessage(msg);
+  socket.on('message', (data) => {
+    displayMessage(data);
   });
 
-  socket.on('initMessages', (msgs) => {
-    msgs.forEach(appendMessage);
+  socket.on('userList', (data) => {
+    updateUsers(data);
   });
-
-  socket.on('onlineUsers', updateUsers);
-  
-  socket.on('userTyping', (data) => {
-    if (data.username !== username && data.channel === currentChannel) {
-      showTyping(data.username);
-    }
-  });
-
-  socket.on('userStopTyping', clearTyping);
 
   socket.on('userJoined', (data) => {
     showSystemMessage(`${data.username} joined the channel`);
@@ -324,25 +421,118 @@ function setupSocketListeners() {
     showSystemMessage(`${data.username} left the channel`);
   });
 
+  socket.on('typing', (data) => {
+    showTyping(data.username);
+  });
+
+  socket.on('stopTyping', () => {
+    clearTyping();
+  });
+
   socket.on('reactionAdded', (data) => {
-    updateReactions(data.messageId, data.reactions);
+    addReactionToMessage(data.messageId, data.emoji, data.username);
   });
 
-  socket.on('serverCreated', (serverData) => {
-    addServerToUI(serverData);
+  socket.on('profileUpdated', (data) => {
+    updateUserInList(data.username, data.avatar, data.bio);
   });
 
-  // Voice chat events
+  socket.on('statusChanged', (data) => {
+    updateUserStatus(data.username, data.status);
+  });
+
+  socket.on('usernameChanged', (data) => {
+    updateUsernameInUI(data.oldUsername, data.newUsername);
+  });
+
+  socket.on('serverCreated', (data) => {
+    addServerToUI(data);
+  });
+
   socket.on('voiceUserJoined', (data) => {
-    addVoiceParticipant(data);
+    addVoiceParticipant(data.username, data.avatar);
   });
 
   socket.on('voiceUserLeft', (data) => {
     removeVoiceParticipant(data.username);
   });
+}
 
-  socket.on('voiceUsersUpdate', (data) => {
-    updateVoiceUsers(data.users);
+// ==================== USER PROFILE VIEWING ====================
+
+async function viewUserProfile(targetUsername) {
+  const result = await apiCall(`/api/user/${targetUsername}`);
+  
+  if (result.success) {
+    const user = result.user;
+    
+    document.getElementById('profileAvatarLarge').textContent = user.avatar;
+    document.getElementById('profileUsername').textContent = user.username;
+    document.getElementById('profileBio').textContent = user.bio || 'No bio set';
+    document.getElementById('profileStatus').textContent = user.status.charAt(0).toUpperCase() + user.status.slice(1);
+    
+    const statusIndicator = document.getElementById('profileStatusIndicator');
+    statusIndicator.className = `status-indicator ${user.status}`;
+    
+    if (user.createdAt) {
+      const date = new Date(user.createdAt);
+      document.getElementById('profileJoinDate').textContent = date.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+    } else {
+      document.getElementById('profileJoinDate').textContent = 'Recently joined';
+    }
+    
+    openModal('userProfileModal');
+  } else {
+    alert('Failed to load user profile');
+  }
+}
+
+async function openAllUsersModal() {
+  openModal('allUsersModal');
+  
+  const result = await apiCall('/api/users');
+  
+  if (result.success) {
+    displayAllUsers(result.users);
+  } else {
+    document.getElementById('allUsersList').innerHTML = '<div class="error-message">Failed to load users</div>';
+  }
+}
+
+function displayAllUsers(users) {
+  const container = document.getElementById('allUsersList');
+  
+  if (users.length === 0) {
+    container.innerHTML = '<div class="no-users">No users found</div>';
+    return;
+  }
+  
+  container.innerHTML = users.map(user => `
+    <div class="user-list-item" onclick="viewUserProfile('${escapeHtml(user.username)}')">
+      <div class="user-list-avatar">
+        <div class="avatar-img">${user.avatar}</div>
+        <div class="status-indicator ${user.status || 'online'}"></div>
+      </div>
+      <div class="user-list-info">
+        <div class="user-list-name">${escapeHtml(user.username)}</div>
+        <div class="user-list-bio">${escapeHtml(user.bio || 'No bio')}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterUsers(query) {
+  const items = document.querySelectorAll('.user-list-item');
+  const lowerQuery = query.toLowerCase();
+  
+  items.forEach(item => {
+    const username = item.querySelector('.user-list-name').textContent.toLowerCase();
+    const bio = item.querySelector('.user-list-bio').textContent.toLowerCase();
+    item.style.display = (username.includes(lowerQuery) || bio.includes(lowerQuery)) ? '' : 'none';
   });
 }
 
@@ -351,113 +541,80 @@ function setupSocketListeners() {
 function sendMessage() {
   const input = document.getElementById('messageInput');
   const text = input.value.trim();
+  
   if (!text) return;
 
-  const message = {
-    id: Date.now() + '_' + Math.random(),
+  socket.emit('message', {
     username,
+    text,
     serverId: currentServer,
     channel: currentChannel,
-    text,
-    timestamp: new Date().toISOString(),
     avatar: selectedAvatar,
-    reactions: {},
     replyTo: replyingTo
-  };
+  });
 
-  socket.emit('message', message);
   input.value = '';
   cancelReply();
+  socket.emit('stopTyping', { username, serverId: currentServer, channel: currentChannel });
 }
 
-function sendGif(gifUrl) {
-  const message = {
-    id: Date.now() + '_' + Math.random(),
-    username,
-    serverId: currentServer,
-    channel: currentChannel,
-    text: '',
-    gifUrl: gifUrl,
-    timestamp: new Date().toISOString(),
-    avatar: selectedAvatar,
-    reactions: {},
-    replyTo: replyingTo
-  };
-
-  socket.emit('message', message);
-  closeModal('gifPickerModal');
-  cancelReply();
-}
-
-function appendMessage(msg) {
-  if (msg.channel !== currentChannel) return;
-
+function displayMessage(data) {
   const msgs = document.getElementById('messages');
   const div = document.createElement('div');
   div.className = 'message';
-  div.dataset.messageId = msg.id;
-  
-  let replyHTML = '';
-  if (msg.replyTo) {
-    replyHTML = `
+  div.dataset.messageId = data.id;
+
+  let replyHtml = '';
+  if (data.replyTo) {
+    replyHtml = `
       <div class="message-reply">
-        <span class="message-reply-username">${escapeHtml(msg.replyTo.username)}</span>
-        <span class="message-reply-text">${escapeHtml(msg.replyTo.text || 'GIF')}</span>
+        <span class="reply-icon">↩️</span>
+        <span class="reply-to">Replying to <strong>${escapeHtml(data.replyTo.username)}</strong>: ${escapeHtml(data.replyTo.text.substring(0, 50))}</span>
       </div>
     `;
   }
 
-  let contentHTML = '';
-  if (msg.gifUrl) {
-    contentHTML = `<div class="message-gif"><img src="${msg.gifUrl}" alt="GIF"></div>`;
-  } else {
-    contentHTML = `<div class="message-text">${escapeHtml(msg.text)}</div>`;
-  }
-
-  let reactionsHTML = '';
-  if (msg.reactions && Object.keys(msg.reactions).length > 0) {
-    reactionsHTML = '<div class="message-reactions">';
-    for (const [emoji, users] of Object.entries(msg.reactions)) {
-      const isActive = users.includes(username);
-      reactionsHTML += `
-        <div class="reaction ${isActive ? 'active' : ''}" onclick="toggleReaction('${msg.id}', '${emoji}')">
-          <span class="reaction-emoji">${emoji}</span>
-          <span class="reaction-count">${users.length}</span>
-        </div>
-      `;
-    }
-    reactionsHTML += '</div>';
+  // Check if message contains GIF URL
+  const gifRegex = /(https:\/\/media\.tenor\.com\/[^\s]+)/g;
+  let messageContent = escapeHtml(data.text);
+  
+  if (gifRegex.test(data.text)) {
+    messageContent = data.text.replace(gifRegex, '<img src="$1" class="message-gif" alt="GIF">');
   }
 
   div.innerHTML = `
-    <div class="message-content">
-      <div class="message-avatar">${escapeHtml(msg.avatar)}</div>
-      <div class="message-body">
-        <div class="message-header">
-          <span class="message-username">${escapeHtml(msg.username)}</span>
-          <span class="message-timestamp">${formatTime(msg.timestamp)}</span>
-        </div>
-        ${replyHTML}
-        ${contentHTML}
-        ${reactionsHTML}
-      </div>
+    <div class="message-avatar" onclick="viewUserProfile('${escapeHtml(data.username)}')" style="cursor: pointer;">
+      <div class="avatar-img">${data.avatar}</div>
     </div>
-    <div class="message-actions">
-      <button class="action-btn" onclick="openReactionPicker('${msg.id}')" title="Add Reaction">😊</button>
-      <button class="action-btn" onclick="replyToMessage('${msg.id}', '${escapeHtml(msg.username)}', '${escapeHtml(msg.text || 'GIF')}')" title="Reply">💬</button>
+    <div class="message-content">
+      ${replyHtml}
+      <div class="message-header">
+        <span class="message-username" onclick="viewUserProfile('${escapeHtml(data.username)}')" style="cursor: pointer;">${escapeHtml(data.username)}</span>
+        <span class="message-timestamp">${formatTime(data.timestamp)}</span>
+      </div>
+      <div class="message-text">${messageContent}</div>
+      <div class="message-reactions" id="reactions-${data.id}"></div>
+      <div class="message-actions">
+        <button class="message-action-btn" onclick="replyToMessage('${data.id}', '${escapeHtml(data.username)}', '${escapeHtml(data.text)}')">💬</button>
+        <button class="message-action-btn" onclick="openReactionPicker('${data.id}')">😊</button>
+      </div>
     </div>
   `;
 
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
+
+  // Remove welcome message if it exists
+  const welcome = msgs.querySelector('.welcome-message');
+  if (welcome) welcome.remove();
 }
 
-function replyToMessage(messageId, messageUsername, messageText) {
-  replyingTo = { id: messageId, username: messageUsername, text: messageText };
+function replyToMessage(messageId, replyUsername, replyText) {
+  replyingTo = { messageId, username: replyUsername, text: replyText };
   
-  document.getElementById('replyUsername').textContent = messageUsername;
-  document.getElementById('replyPreview').textContent = messageText.substring(0, 100);
-  document.getElementById('replyIndicator').style.display = 'block';
+  document.getElementById('replyIndicator').style.display = 'flex';
+  document.getElementById('replyUsername').textContent = replyUsername;
+  document.getElementById('replyPreview').textContent = replyText.substring(0, 100);
   document.getElementById('messageInput').focus();
 }
 
@@ -470,179 +627,158 @@ function cancelReply() {
 
 function openReactionPicker(messageId) {
   currentMessageIdForReaction = messageId;
+  loadReactionEmojis('smileys');
   openModal('reactionPickerModal');
 }
 
-function loadReactionCategory(category) {
+function loadReactionEmojis(category) {
   const grid = document.getElementById('reactionGrid');
   const emojis = emojiCategories[category] || [];
   
   grid.innerHTML = emojis.map(emoji => 
-    `<div class="emoji-reaction" onclick="addReactionToMessage('${emoji}')">${emoji}</div>`
+    `<div class="reaction-emoji" onclick="addReaction('${emoji}')">${emoji}</div>`
   ).join('');
 }
 
-function addReactionToMessage(emoji) {
+function addReaction(emoji) {
   if (!currentMessageIdForReaction) return;
   
   socket.emit('addReaction', {
     messageId: currentMessageIdForReaction,
-    emoji: emoji,
-    username: username
+    emoji,
+    username,
+    serverId: currentServer,
+    channel: currentChannel
   });
   
   closeModal('reactionPickerModal');
+  currentMessageIdForReaction = null;
 }
 
-function toggleReaction(messageId, emoji) {
-  socket.emit('addReaction', {
-    messageId: messageId,
-    emoji: emoji,
-    username: username
-  });
-}
+function addReactionToMessage(messageId, emoji, reactUsername) {
+  const reactionsDiv = document.getElementById(`reactions-${messageId}`);
+  if (!reactionsDiv) return;
 
-function updateReactions(messageId, reactions) {
-  const messageEl = document.querySelector(`[data-message-id="${messageId}"]`);
-  if (!messageEl) return;
+  let emojiSpan = Array.from(reactionsDiv.children).find(span => 
+    span.textContent.includes(emoji)
+  );
 
-  const existingReactions = messageEl.querySelector('.message-reactions');
-  if (existingReactions) {
-    existingReactions.remove();
-  }
-
-  if (Object.keys(reactions).length === 0) return;
-
-  let reactionsHTML = '<div class="message-reactions">';
-  for (const [emoji, users] of Object.entries(reactions)) {
-    const isActive = users.includes(username);
-    reactionsHTML += `
-      <div class="reaction ${isActive ? 'active' : ''}" onclick="toggleReaction('${messageId}', '${emoji}')">
-        <span class="reaction-emoji">${emoji}</span>
-        <span class="reaction-count">${users.length}</span>
-      </div>
-    `;
-  }
-  reactionsHTML += '</div>';
-
-  const messageBody = messageEl.querySelector('.message-body');
-  messageBody.insertAdjacentHTML('beforeend', reactionsHTML);
-}
-
-// ==================== GIF SEARCH ====================
-
-async function searchGifs(query) {
-  const grid = document.getElementById('gifGrid');
-  grid.innerHTML = '<div class="gif-loading">Searching GIFs...</div>';
-
-  try {
-    const endpoint = query === 'trending' 
-      ? `https://tenor.googleapis.com/v2/featured?key=${TENOR_API_KEY}&client_key=${TENOR_CLIENT_KEY}&limit=20`
-      : `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${TENOR_API_KEY}&client_key=${TENOR_CLIENT_KEY}&limit=20`;
-    
-    const response = await fetch(endpoint);
-    const data = await response.json();
-    
-    if (data.results && data.results.length > 0) {
-      grid.innerHTML = data.results.map(gif => {
-        const url = gif.media_formats.tinygif?.url || gif.media_formats.gif?.url;
-        return `
-          <div class="gif-item" onclick="sendGif('${url}')">
-            <img src="${url}" alt="${gif.content_description}">
-          </div>
-        `;
-      }).join('');
-    } else {
-      grid.innerHTML = '<div class="gif-loading">No GIFs found. Try another search!</div>';
-    }
-  } catch (error) {
-    console.error('GIF search error:', error);
-    grid.innerHTML = '<div class="gif-loading">Error loading GIFs. Please try again.</div>';
-  }
-}
-
-function openGifPicker() {
-  openModal('gifPickerModal');
-  if (document.getElementById('gifGrid').children.length === 1) {
-    searchGifs('trending');
+  if (emojiSpan) {
+    const count = parseInt(emojiSpan.dataset.count || '1') + 1;
+    emojiSpan.dataset.count = count;
+    emojiSpan.textContent = `${emoji} ${count}`;
+  } else {
+    emojiSpan = document.createElement('span');
+    emojiSpan.className = 'reaction';
+    emojiSpan.dataset.count = '1';
+    emojiSpan.textContent = `${emoji} 1`;
+    reactionsDiv.appendChild(emojiSpan);
   }
 }
 
 function insertEmojiIntoMessage() {
-  const emojis = ['😀', '😃', '😄', '😁', '😊', '😎', '😍', '🥰', '😘', '😂', '🤣', '😭', '😱', '🤔', '👍', '❤️'];
-  const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+  const randomEmojis = ['😀', '😊', '❤️', '👍', '🎉', '🔥', '✨', '💯'];
+  const emoji = randomEmojis[Math.floor(Math.random() * randomEmojis.length)];
   const input = document.getElementById('messageInput');
   input.value += emoji;
   input.focus();
 }
 
-// ==================== VOICE CHAT ====================
+// ==================== GIF PICKER ====================
+
+function openGifPicker() {
+  openModal('gifPickerModal');
+  searchGifs('trending');
+}
+
+async function searchGifs(query) {
+  const grid = document.getElementById('gifGrid');
+  grid.innerHTML = '<div class="gif-loading">Loading GIFs...</div>';
+
+  try {
+    const endpoint = query === 'trending' 
+      ? `https://tenor.googleapis.com/v2/featured?key=${TENOR_API_KEY}&client_key=${TENOR_CLIENT_KEY}&limit=20`
+      : `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(query)}&key=${TENOR_API_KEY}&client_key=${TENOR_CLIENT_KEY}&limit=20`;
+
+    const response = await fetch(endpoint);
+    const data = await response.json();
+
+    if (data.results && data.results.length > 0) {
+      grid.innerHTML = data.results.map(gif => {
+        const gifUrl = gif.media_formats.gif.url;
+        return `<div class="gif-item" onclick="sendGif('${gifUrl}')">
+          <img src="${gifUrl}" alt="GIF">
+        </div>`;
+      }).join('');
+    } else {
+      grid.innerHTML = '<div class="no-gifs">No GIFs found</div>';
+    }
+  } catch (error) {
+    grid.innerHTML = '<div class="error-message">Failed to load GIFs</div>';
+    console.error('GIF search error:', error);
+  }
+}
+
+function sendGif(gifUrl) {
+  socket.emit('message', {
+    username,
+    text: gifUrl,
+    serverId: currentServer,
+    channel: currentChannel,
+    avatar: selectedAvatar,
+    replyTo: replyingTo
+  });
+
+  closeModal('gifPickerModal');
+  cancelReply();
+}
+
+// ==================== VOICE CHANNELS ====================
 
 function showVoiceChannels() {
-  alert('Click on a voice channel in the sidebar to join!');
+  alert('Voice channels feature - Select a voice channel from the sidebar!');
 }
 
 function joinVoiceChannel(channel) {
-  currentVoiceChannel = channel;
-  document.getElementById('joiningVoiceChannel').textContent = channel.replace('voice-', '').toUpperCase();
+  document.getElementById('joiningVoiceChannel').textContent = channel;
   openModal('voiceJoinModal');
+  currentVoiceChannel = channel;
 }
 
-async function confirmJoinVoice() {
-  closeModal('voiceJoinModal');
+function confirmJoinVoice() {
+  if (!currentVoiceChannel) return;
   
-  try {
-    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    
-    inVoiceChannel = true;
-    document.getElementById('voicePanel').classList.add('active');
-    document.getElementById('voiceChannelName').textContent = currentVoiceChannel.replace('voice-', '').toUpperCase();
-    
-    socket.emit('joinVoice', {
-      username,
-      channel: currentVoiceChannel,
-      serverId: currentServer,
-      avatar: selectedAvatar
-    });
-    
-    showSystemMessage(`You joined voice channel: ${currentVoiceChannel}`);
-  } catch (error) {
-    console.error('Microphone access error:', error);
-    alert('Could not access microphone. Please check your permissions.');
-  }
+  inVoiceChannel = true;
+  document.getElementById('voiceChannelName').textContent = currentVoiceChannel;
+  document.getElementById('voicePanel').classList.add('active');
+  
+  socket.emit('joinVoice', { 
+    username, 
+    channel: currentVoiceChannel,
+    avatar: selectedAvatar
+  });
+  
+  closeModal('voiceJoinModal');
 }
 
 function leaveVoiceChannel() {
-  if (voiceStream) {
-    voiceStream.getTracks().forEach(track => track.stop());
-    voiceStream = null;
-  }
+  if (!currentVoiceChannel) return;
   
-  socket.emit('leaveVoice', {
-    username,
-    channel: currentVoiceChannel,
-    serverId: currentServer
+  socket.emit('leaveVoice', { 
+    username, 
+    channel: currentVoiceChannel 
   });
   
   inVoiceChannel = false;
-  currentVoiceChannel = null;
   document.getElementById('voicePanel').classList.remove('active');
-  
-  showSystemMessage('You left the voice channel');
+  currentVoiceChannel = null;
 }
 
 function toggleMute() {
-  if (!voiceStream) return;
-  
   isMuted = !isMuted;
-  voiceStream.getAudioTracks().forEach(track => {
-    track.enabled = !isMuted;
-  });
-  
   const btn = document.getElementById('muteMicBtn');
   btn.classList.toggle('muted', isMuted);
-  btn.querySelector('span').textContent = isMuted ? '🔇' : '🎤';
-  btn.title = isMuted ? 'Unmute' : 'Mute';
+  btn.querySelector('span').textContent = isMuted ? '🎤🚫' : '🎤';
 }
 
 function toggleDeafen() {
@@ -650,30 +786,24 @@ function toggleDeafen() {
   const btn = document.getElementById('deafenBtn');
   btn.classList.toggle('deafened', isDeafened);
   btn.querySelector('span').textContent = isDeafened ? '🔇' : '🔊';
-  btn.title = isDeafened ? 'Undeafen' : 'Deafen';
 }
 
 function shareScreen() {
   alert('Screen sharing feature coming soon!');
 }
 
-function addVoiceParticipant(data) {
+function addVoiceParticipant(username, avatar) {
   const container = document.getElementById('voiceParticipants');
-  const existingParticipant = container.querySelector(`[data-username="${data.username}"]`);
-  
-  if (existingParticipant) return;
-  
   const div = document.createElement('div');
   div.className = 'voice-participant';
-  div.dataset.username = data.username;
+  div.dataset.username = username;
   div.innerHTML = `
-    <div class="participant-avatar">${data.avatar}</div>
+    <div class="participant-avatar">${avatar}</div>
     <div class="participant-info">
-      <div class="participant-name">${escapeHtml(data.username)}</div>
+      <div class="participant-name">${escapeHtml(username)}</div>
       <div class="participant-status">🎤 Speaking</div>
     </div>
   `;
-  
   container.appendChild(div);
 }
 
@@ -714,32 +844,43 @@ function openEditProfile() {
   openModal('editProfileModal');
 }
 
-function saveProfile() {
+async function saveProfile() {
   const newUsername = document.getElementById('editUsername').value.trim();
   const newBio = document.getElementById('editBio').value.trim();
   
-  if (newUsername && newUsername !== username) {
+  const result = await apiCall('/api/user/profile', {
+    method: 'PUT',
+    body: JSON.stringify({
+      username: newUsername || username,
+      avatar: selectedAvatar,
+      bio: newBio
+    })
+  });
+
+  if (result.success) {
     const oldUsername = username;
-    username = newUsername;
+    
+    if (result.newToken) {
+      authToken = result.newToken;
+      localStorage.setItem('authToken', authToken);
+    }
+    
+    username = result.user.username;
+    userBio = result.user.bio;
+    selectedAvatar = result.user.avatar;
+    
     document.getElementById('myUsername').textContent = username;
-    socket.emit('usernameChange', { oldUsername, newUsername });
-  }
-  
-  if (selectedAvatar) {
     document.getElementById('myAvatar').querySelector('.avatar-img').textContent = selectedAvatar;
+    
+    if (oldUsername !== username) {
+      socket.emit('usernameChange', { oldUsername, newUsername: username });
+    }
+    
+    socket.emit('profileUpdate', { username, avatar: selectedAvatar, bio: userBio });
+    closeModal('editProfileModal');
+  } else {
+    alert(result.error || 'Failed to update profile');
   }
-  
-  userBio = newBio || 'Hey there! I use Patecord.';
-  
-  localStorage.setItem('userProfile', JSON.stringify({
-    username,
-    email: userEmail,
-    avatar: selectedAvatar,
-    bio: userBio
-  }));
-  
-  socket.emit('profileUpdate', { username, avatar: selectedAvatar, bio: userBio });
-  closeModal('editProfileModal');
 }
 
 function createServer() {
@@ -829,7 +970,7 @@ function updateUsers(data) {
   
   const onlineContainer = document.getElementById('onlineUsers');
   onlineContainer.innerHTML = onlineUsers.map(user => `
-    <div class="member">
+    <div class="member" onclick="viewUserProfile('${escapeHtml(user.username)}')" style="cursor: pointer;">
       <div class="member-avatar">
         <div class="avatar-img">${user.avatar || '😺'}</div>
         <div class="status-indicator ${user.status || 'online'}"></div>
@@ -837,6 +978,44 @@ function updateUsers(data) {
       <span class="member-name">${escapeHtml(user.username)}</span>
     </div>
   `).join('');
+}
+
+function updateUserInList(username, avatar, bio) {
+  const memberElements = document.querySelectorAll('.member-name');
+  memberElements.forEach(el => {
+    if (el.textContent === username) {
+      const avatarEl = el.closest('.member').querySelector('.avatar-img');
+      if (avatarEl) avatarEl.textContent = avatar;
+    }
+  });
+}
+
+function updateUserStatus(username, status) {
+  const memberElements = document.querySelectorAll('.member-name');
+  memberElements.forEach(el => {
+    if (el.textContent === username) {
+      const statusEl = el.closest('.member').querySelector('.status-indicator');
+      if (statusEl) {
+        statusEl.className = `status-indicator ${status}`;
+      }
+    }
+  });
+}
+
+function updateUsernameInUI(oldUsername, newUsername) {
+  const memberElements = document.querySelectorAll('.member-name');
+  memberElements.forEach(el => {
+    if (el.textContent === oldUsername) {
+      el.textContent = newUsername;
+    }
+  });
+  
+  const messageUsernames = document.querySelectorAll('.message-username');
+  messageUsernames.forEach(el => {
+    if (el.textContent === oldUsername) {
+      el.textContent = newUsername;
+    }
+  });
 }
 
 function showTyping(username) {
@@ -865,6 +1044,12 @@ function setUserStatus(status) {
   document.getElementById('statusBtn').textContent = statusEmojis[status];
   
   socket.emit('statusChange', { username, status });
+  
+  // Update on backend
+  apiCall('/api/user/profile', {
+    method: 'PUT',
+    body: JSON.stringify({ status })
+  });
 }
 
 function toggleTheme() {

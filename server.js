@@ -1,308 +1,443 @@
 const express = require('express');
-const app = express();
-const http = require('http').createServer(app);
-const io = require('socket.io')(http);
+const http = require('http');
+const { Server } = require('socket.io');
 const path = require('path');
+const bcrypt = require('bcrypt');
+
+const app = express();
+const server = http.createServer(app);
+
+// Replace with your actual Tenor API key
+const TENOR_API_KEY = 'YOUR_TENOR_API_KEY';
+
+// CORS for socket.io
+const io = new Server(server, {
+  cors: {
+    origin: '*', // restrict in production
+    methods: ['GET', 'POST']
+  }
+});
 
 app.use(express.static(__dirname));
+app.use(express.json());
 
+// Serve frontend
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-const servers = {
-  general: { 
-    name: 'General Server',
-    icon: '🐱',
-    channels: ['general', 'random', 'dev', 'memes'], 
-    messages: {} 
-  },
-  dev: { 
-    name: 'Development',
-    icon: '⚙️',
-    channels: ['general', 'frontend', 'backend'], 
-    messages: {} 
-  },
-  gaming: { 
-    name: 'Gaming Hub',
-    icon: '🎮',
-    channels: ['general', 'pc', 'console'], 
-    messages: {} 
+// File-based user storage
+const fs = require('fs');
+const USERS_FILE = 'users.json';
+
+// Load users from file at startup
+let users = {};
+if (fs.existsSync(USERS_FILE)) {
+  users = JSON.parse(fs.readFileSync(USERS_FILE));
+}
+
+// Save users to file
+function saveUsers() {
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+}
+
+// Helper: register user
+async function registerUser(email, username, password, avatar) {
+  if (users[username]) return { success: false, error: 'Username exists' };
+  
+  // Check if email exists
+  for (const user of Object.values(users)) {
+    if (user.email === email) {
+      return { success: false, error: 'Email already registered' };
+    }
   }
-};
-
-const users = new Map();
-const channelUsers = {};
-const voiceChannels = {};
-
-function getChannelKey(serverId, channel) {
-  return `${serverId}-${channel}`;
+  
+  const hashedPassword = await bcrypt.hash(password, 10);
+  users[username] = { 
+    email, 
+    password: hashedPassword, 
+    avatar, 
+    bio: 'Hey there! I use Patecord.',
+    status: 'online',
+    createdAt: new Date().toISOString()
+  };
+  saveUsers();
+  return { 
+    success: true, 
+    user: { 
+      username, 
+      email, 
+      avatar, 
+      bio: 'Hey there! I use Patecord.',
+      status: 'online'
+    } 
+  };
 }
 
-function getVoiceChannelKey(serverId, channel) {
-  return `voice-${serverId}-${channel}`;
+// Helper: verify password
+async function verifyPassword(username, password) {
+  if (!users[username]) return false;
+  const user = users[username];
+  return await bcrypt.compare(password, user.password);
 }
 
-function getUsersInChannel(serverId, channel) {
-  const key = getChannelKey(serverId, channel);
-  if (!channelUsers[key]) channelUsers[key] = new Set();
-  return channelUsers[key];
-}
+// API: Register
+app.post('/api/auth/register', async (req, res) => {
+  const { email, username, password, avatar } = req.body;
+  
+  if (!email || !username || !password) {
+    return res.json({ success: false, error: 'All fields are required' });
+  }
+  
+  const result = await registerUser(email, username, password, avatar || '😺');
+  if (result.success) {
+    res.json({ success: true, user: result.user, token: username });
+  } else {
+    res.json({ success: false, error: result.error });
+  }
+});
 
-function broadcastUserList(serverId, channel) {
-  const key = getChannelKey(serverId, channel);
-  const usersInChannel = Array.from(getUsersInChannel(serverId, channel));
-  const userList = usersInChannel.map(socketId => users.get(socketId)).filter(Boolean);
-  io.to(key).emit('onlineUsers', { users: userList });
-}
+// API: Verify token
+app.get('/api/auth/verify', (req, res) => {
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const username = authHeader.substring(7);
+    if (users[username]) {
+      const user = users[username];
+      res.json({ 
+        success: true, 
+        user: { 
+          username, 
+          email: user.email, 
+          avatar: user.avatar, 
+          bio: user.bio,
+          status: user.status || 'online'
+        } 
+      });
+      return;
+    }
+  }
+  res.json({ success: false });
+});
+
+// API: Login
+app.post('/api/auth/login', async (req, res) => {
+  const { emailOrUsername, password } = req.body;
+  
+  if (!emailOrUsername || !password) {
+    return res.json({ success: false, error: 'All fields are required' });
+  }
+  
+  // Check username
+  if (users[emailOrUsername]) {
+    const user = users[emailOrUsername];
+    const match = await bcrypt.compare(password, user.password);
+    if (match) {
+      return res.json({ 
+        success: true, 
+        token: emailOrUsername, 
+        user: { 
+          username: emailOrUsername, 
+          email: user.email, 
+          avatar: user.avatar, 
+          bio: user.bio,
+          status: user.status || 'online'
+        } 
+      });
+    }
+  }
+  
+  // Check email
+  for (const [username, user] of Object.entries(users)) {
+    if (user.email === emailOrUsername) {
+      const match = await bcrypt.compare(password, user.password);
+      if (match) {
+        return res.json({ 
+          success: true, 
+          token: username, 
+          user: { 
+            username, 
+            email: user.email, 
+            avatar: user.avatar, 
+            bio: user.bio,
+            status: user.status || 'online'
+          } 
+        });
+      }
+    }
+  }
+  
+  res.json({ success: false, error: 'Invalid credentials' });
+});
+
+// API: Update profile
+app.put('/api/user/profile', async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.json({ success: false, error: 'Unauthorized' });
+  }
+  
+  const currentUsername = authHeader.substring(7);
+  if (!users[currentUsername]) {
+    return res.json({ success: false, error: 'Invalid token' });
+  }
+  
+  const user = users[currentUsername];
+  const { username: newUsername, avatar, bio, status } = req.body;
+  
+  // Handle username change
+  if (newUsername && newUsername !== currentUsername) {
+    if (users[newUsername]) {
+      return res.json({ success: false, error: 'Username already exists' });
+    }
+    // Move user to new username key
+    users[newUsername] = { ...user };
+    delete users[currentUsername];
+    
+    // Update fields on new username
+    if (avatar) users[newUsername].avatar = avatar;
+    if (bio !== undefined) users[newUsername].bio = bio;
+    if (status) users[newUsername].status = status;
+    
+    saveUsers();
+    return res.json({ 
+      success: true, 
+      user: { 
+        username: newUsername, 
+        email: users[newUsername].email, 
+        avatar: users[newUsername].avatar, 
+        bio: users[newUsername].bio,
+        status: users[newUsername].status
+      },
+      newToken: newUsername
+    });
+  }
+  
+  // Update without username change
+  if (avatar) users[currentUsername].avatar = avatar;
+  if (bio !== undefined) users[currentUsername].bio = bio;
+  if (status) users[currentUsername].status = status;
+  
+  saveUsers();
+  res.json({ 
+    success: true, 
+    user: { 
+      username: currentUsername, 
+      email: users[currentUsername].email, 
+      avatar: users[currentUsername].avatar, 
+      bio: users[currentUsername].bio,
+      status: users[currentUsername].status
+    } 
+  });
+});
+
+// API: Get user profile by username
+app.get('/api/user/:username', (req, res) => {
+  const { username } = req.params;
+  
+  if (!users[username]) {
+    return res.json({ success: false, error: 'User not found' });
+  }
+  
+  const user = users[username];
+  res.json({
+    success: true,
+    user: {
+      username,
+      avatar: user.avatar,
+      bio: user.bio,
+      status: user.status || 'online',
+      createdAt: user.createdAt
+    }
+  });
+});
+
+// API: Get all users (excluding passwords)
+app.get('/api/users', (req, res) => {
+  const allUsers = Object.entries(users).map(([username, user]) => ({
+    username,
+    avatar: user.avatar,
+    bio: user.bio,
+    status: user.status || 'online',
+    createdAt: user.createdAt
+  }));
+  
+  res.json({ success: true, users: allUsers });
+});
+
+// ==================== SOCKET.IO ====================
+
+const onlineUsers = new Map(); // username -> { socketId, avatar, status, bio }
+const channels = new Map(); // "serverId:channel" -> Set of usernames
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
-
+  
+  // User joins
   socket.on('join', (data) => {
     const { username, serverId, channel, avatar, status, bio } = data;
     
-    if (users.has(socket.id)) {
-      const prevData = users.get(socket.id);
-      const prevKey = getChannelKey(prevData.serverId, prevData.channel);
-      socket.leave(prevKey);
-      getUsersInChannel(prevData.serverId, prevData.channel).delete(socket.id);
-      broadcastUserList(prevData.serverId, prevData.channel);
-      io.to(prevKey).emit('userLeft', { username: prevData.username });
-    }
-    
-    users.set(socket.id, { 
-      username, 
-      serverId, 
-      channel, 
-      avatar: avatar || '😺', 
+    onlineUsers.set(username, {
+      socketId: socket.id,
+      avatar: avatar || '😺',
       status: status || 'online',
       bio: bio || 'Hey there! I use Patecord.'
     });
     
-    const channelKey = getChannelKey(serverId, channel);
+    const channelKey = `${serverId}:${channel}`;
+    if (!channels.has(channelKey)) {
+      channels.set(channelKey, new Set());
+    }
+    channels.get(channelKey).add(username);
+    
     socket.join(channelKey);
-    getUsersInChannel(serverId, channel).add(socket.id);
+    socket.username = username;
+    socket.currentChannel = channelKey;
     
-    if (!servers[serverId]) {
-      servers[serverId] = { 
-        name: 'Custom Server',
-        icon: '🏠',
-        channels: [channel], 
-        messages: {} 
-      };
-    }
-    if (!servers[serverId].messages[channel]) {
-      servers[serverId].messages[channel] = [];
-    }
+    // Broadcast user list to channel
+    const channelUsers = Array.from(channels.get(channelKey)).map(u => ({
+      username: u,
+      avatar: onlineUsers.get(u)?.avatar || '😺',
+      status: onlineUsers.get(u)?.status || 'online',
+      bio: onlineUsers.get(u)?.bio || 'Hey there! I use Patecord.'
+    }));
     
-    socket.emit('initMessages', servers[serverId].messages[channel]);
-    socket.to(channelKey).emit('userJoined', { username });
-    broadcastUserList(serverId, channel);
-    
-    console.log(`${username} joined ${serverId}/${channel}`);
+    io.to(channelKey).emit('userList', { users: channelUsers });
+    io.to(channelKey).emit('userJoined', { username, avatar, timestamp: Date.now() });
   });
-
-  socket.on('message', (msg) => {
-    const { serverId, channel } = msg;
-    const channelKey = getChannelKey(serverId, channel);
+  
+  // Message
+  socket.on('message', (data) => {
+    const { username, text, serverId, channel, avatar, replyTo } = data;
+    const channelKey = `${serverId}:${channel}`;
     
-    if (!servers[serverId].messages[channel]) {
-      servers[serverId].messages[channel] = [];
-    }
-    
-    if (!msg.reactions) msg.reactions = {};
-    
-    servers[serverId].messages[channel].push(msg);
-    
-    // Keep only last 100 messages per channel
-    if (servers[serverId].messages[channel].length > 100) {
-      servers[serverId].messages[channel].shift();
-    }
-    
-    io.to(channelKey).emit('newMessage', msg);
-    console.log(`Message in ${serverId}/${channel} from ${msg.username}`);
-  });
-
-  socket.on('addReaction', (data) => {
-    const { messageId, emoji, username } = data;
-    const userData = users.get(socket.id);
-    
-    if (!userData) return;
-    
-    const { serverId, channel } = userData;
-    const messages = servers[serverId]?.messages[channel];
-    
-    if (!messages) return;
-    
-    const message = messages.find(m => m.id === messageId);
-    if (message) {
-      if (!message.reactions) message.reactions = {};
-      if (!message.reactions[emoji]) message.reactions[emoji] = [];
-      
-      const userIndex = message.reactions[emoji].indexOf(username);
-      if (userIndex === -1) {
-        message.reactions[emoji].push(username);
-      } else {
-        message.reactions[emoji].splice(userIndex, 1);
-        if (message.reactions[emoji].length === 0) {
-          delete message.reactions[emoji];
-        }
-      }
-      
-      const channelKey = getChannelKey(serverId, channel);
-      io.to(channelKey).emit('reactionAdded', { 
-        messageId, 
-        reactions: message.reactions 
-      });
-    }
-  });
-
-  socket.on('typing', (data) => {
-    const { username, serverId, channel } = data;
-    socket.to(getChannelKey(serverId, channel)).emit('userTyping', { username, channel });
-  });
-
-  socket.on('stopTyping', (data) => {
-    const { serverId, channel } = data;
-    socket.to(getChannelKey(serverId, channel)).emit('userStopTyping');
-  });
-
-  socket.on('statusChange', (data) => {
-    const userData = users.get(socket.id);
-    if (userData) {
-      userData.status = data.status;
-      users.set(socket.id, userData);
-      broadcastUserList(userData.serverId, userData.channel);
-    }
-  });
-
-  socket.on('profileUpdate', (data) => {
-    const userData = users.get(socket.id);
-    if (userData) {
-      if (data.avatar) userData.avatar = data.avatar;
-      if (data.bio) userData.bio = data.bio;
-      users.set(socket.id, userData);
-      broadcastUserList(userData.serverId, userData.channel);
-    }
-  });
-
-  socket.on('usernameChange', (data) => {
-    const { oldUsername, newUsername } = data;
-    const userData = users.get(socket.id);
-    if (userData) {
-      userData.username = newUsername;
-      users.set(socket.id, userData);
-      
-      const channelKey = getChannelKey(userData.serverId, userData.channel);
-      io.to(channelKey).emit('userJoined', { username: newUsername });
-      broadcastUserList(userData.serverId, userData.channel);
-      
-      console.log(`User renamed: ${oldUsername} -> ${newUsername}`);
-    }
-  });
-
-  socket.on('createServer', (serverData) => {
-    const { id, name, icon, channels } = serverData;
-    
-    servers[id] = {
-      name,
-      icon,
-      channels: channels || ['general'],
-      messages: {}
+    const messageData = {
+      id: Date.now() + Math.random(),
+      username,
+      text,
+      avatar: avatar || '😺',
+      timestamp: Date.now(),
+      reactions: [],
+      replyTo: replyTo || null
     };
     
-    // Initialize message storage for channels
-    (channels || ['general']).forEach(channel => {
-      servers[id].messages[channel] = [];
+    io.to(channelKey).emit('message', messageData);
+  });
+  
+  // Typing indicators
+  socket.on('typing', (data) => {
+    const { username, serverId, channel } = data;
+    const channelKey = `${serverId}:${channel}`;
+    socket.to(channelKey).emit('typing', { username });
+  });
+  
+  socket.on('stopTyping', (data) => {
+    const { serverId, channel } = data;
+    const channelKey = `${serverId}:${channel}`;
+    socket.to(channelKey).emit('stopTyping');
+  });
+  
+  // Reactions
+  socket.on('addReaction', (data) => {
+    const { messageId, emoji, username, serverId, channel } = data;
+    const channelKey = `${serverId}:${channel}`;
+    io.to(channelKey).emit('reactionAdded', { messageId, emoji, username });
+  });
+  
+  // Profile updates
+  socket.on('profileUpdate', (data) => {
+    const { username, avatar, bio } = data;
+    
+    if (onlineUsers.has(username)) {
+      const userData = onlineUsers.get(username);
+      userData.avatar = avatar;
+      userData.bio = bio;
+      onlineUsers.set(username, userData);
+    }
+    
+    // Broadcast to all channels user is in
+    io.emit('profileUpdated', { username, avatar, bio });
+  });
+  
+  // Status change
+  socket.on('statusChange', (data) => {
+    const { username, status } = data;
+    
+    if (onlineUsers.has(username)) {
+      const userData = onlineUsers.get(username);
+      userData.status = status;
+      onlineUsers.set(username, userData);
+    }
+    
+    io.emit('statusChanged', { username, status });
+  });
+  
+  // Username change
+  socket.on('usernameChange', (data) => {
+    const { oldUsername, newUsername } = data;
+    
+    if (onlineUsers.has(oldUsername)) {
+      const userData = onlineUsers.get(oldUsername);
+      onlineUsers.delete(oldUsername);
+      onlineUsers.set(newUsername, userData);
+    }
+    
+    // Update in all channels
+    channels.forEach((userSet, channelKey) => {
+      if (userSet.has(oldUsername)) {
+        userSet.delete(oldUsername);
+        userSet.add(newUsername);
+      }
     });
     
-    // Broadcast to all connected clients
-    io.emit('serverCreated', serverData);
-    
-    console.log(`Server created: ${name} (${id}) by ${serverData.creator}`);
+    io.emit('usernameChanged', { oldUsername, newUsername });
   });
-
-  socket.on('disconnect', () => {
-    const userData = users.get(socket.id);
-    if (userData) {
-      const { username, serverId, channel } = userData;
-      const channelKey = getChannelKey(serverId, channel);
-      getUsersInChannel(serverId, channel).delete(socket.id);
-      socket.to(channelKey).emit('userLeft', { username });
-      broadcastUserList(serverId, channel);
-      console.log(`${username} disconnected`);
-    }
-    users.delete(socket.id);
-  });
-
-  // Voice channel handlers
+  
+  // Voice channel
   socket.on('joinVoice', (data) => {
-    const { username, channel, serverId, avatar } = data;
-    const voiceKey = getVoiceChannelKey(serverId, channel);
-    
-    if (!voiceChannels[voiceKey]) {
-      voiceChannels[voiceKey] = new Set();
-    }
-    
-    voiceChannels[voiceKey].add(socket.id);
-    socket.join(voiceKey);
-    
-    const voiceUserData = { username, avatar, socketId: socket.id };
-    
-    // Notify others in the voice channel
-    socket.to(voiceKey).emit('voiceUserJoined', voiceUserData);
-    
-    // Send current voice users to the joining user
-    const currentUsers = Array.from(voiceChannels[voiceKey])
-      .map(id => users.get(id))
-      .filter(Boolean)
-      .map(u => ({ username: u.username, avatar: u.avatar }));
-    
-    socket.emit('voiceUsersUpdate', { users: currentUsers });
-    
-    console.log(`${username} joined voice channel: ${channel}`);
+    const { username, channel, avatar } = data;
+    socket.join(`voice:${channel}`);
+    io.to(`voice:${channel}`).emit('voiceUserJoined', { username, avatar });
   });
-
+  
   socket.on('leaveVoice', (data) => {
-    const { username, channel, serverId } = data;
-    const voiceKey = getVoiceChannelKey(serverId, channel);
-    
-    if (voiceChannels[voiceKey]) {
-      voiceChannels[voiceKey].delete(socket.id);
-      socket.leave(voiceKey);
-      socket.to(voiceKey).emit('voiceUserLeft', { username });
-      console.log(`${username} left voice channel: ${channel}`);
-    }
+    const { username, channel } = data;
+    socket.leave(`voice:${channel}`);
+    io.to(`voice:${channel}`).emit('voiceUserLeft', { username });
   });
-
-  socket.on('voiceSignal', (data) => {
-    const { to, signal } = data;
-    io.to(to).emit('voiceSignal', {
-      from: socket.id,
-      signal
-    });
+  
+  // Server creation
+  socket.on('createServer', (data) => {
+    io.emit('serverCreated', data);
+  });
+  
+  // Disconnect
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+    
+    if (socket.username) {
+      const channelKey = socket.currentChannel;
+      
+      if (channelKey && channels.has(channelKey)) {
+        channels.get(channelKey).delete(socket.username);
+        
+        const channelUsers = Array.from(channels.get(channelKey)).map(u => ({
+          username: u,
+          avatar: onlineUsers.get(u)?.avatar || '😺',
+          status: onlineUsers.get(u)?.status || 'online',
+          bio: onlineUsers.get(u)?.bio || 'Hey there! I use Patecord.'
+        }));
+        
+        io.to(channelKey).emit('userList', { users: channelUsers });
+        io.to(channelKey).emit('userLeft', { username: socket.username, timestamp: Date.now() });
+      }
+      
+      onlineUsers.delete(socket.username);
+    }
   });
 });
 
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => {
-  console.log(`
-╔═══════════════════════════════════════════════════════════╗
-║                                                           ║
-║   🐱 PATECORD SERVER - ENHANCED VERSION                  ║
-║                                                           ║
-║   🚀 Server running on http://localhost:${PORT}              ║
-║                                                           ║
-║   ✨ NEW FEATURES:                                        ║
-║   ✓ Reply to messages                                    ║
-║   ✓ Emoji reactions (100+ emojis)                        ║
-║   ✓ GIF search & send (Tenor API)                        ║
-║   ✓ Create custom servers                                ║
-║   ✓ Edit profile (avatar, username, bio)                 ║
-║   ✓ Message threading with replies                       ║
-║   ✓ Enhanced UI with smooth animations                   ║
-║                                                           ║
-╚═══════════════════════════════════════════════════════════╝
-  `);
+server.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
