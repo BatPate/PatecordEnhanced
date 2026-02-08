@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Patecord - Enhanced Edition</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Fraunces:wght@600;700&display=swap" rel="stylesheet">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body data-theme="dark">
+  <!-- Login Screen -->
+  <div class="login-screen" id="loginScreen">
+    <div class="login-container">
+      <div class="login-header">
+        <h1>🐱 Welcome to Patecord</h1>
+        <p>Connect with friends and communities</p>
+      </div>
+      
+      <div class="login-tabs">
+        <button class="tab-btn active" data-tab="login">Login</button>
+        <button class="tab-btn" data-tab="register">Register</button>
+      </div>
+
+      <!-- Login Form -->
+      <div class="login-form active" id="loginForm">
+        <div class="form-group">
+          <label>Username or Email</label>
+          <input type="text" id="loginUsername" class="form-input" placeholder="Enter username or email">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="loginPassword" class="form-input" placeholder="Enter password">
+        </div>
+        <button class="primary-btn" id="loginBtn">Login</button>
+        <div class="form-hint">Demo: Use any username without password</div>
+      </div>
+
+      <!-- Register Form -->
+      <div class="login-form" id="registerForm">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="registerEmail" class="form-input" placeholder="Enter your email">
+        </div>
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" id="registerUsername" class="form-input" placeholder="Choose a username">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="registerPassword" class="form-input" placeholder="Create a password">
+        </div>
+        <div class="form-group">
+          <label>Choose Avatar</label>
+          <div class="avatar-selector-login">
+            <div class="avatar-option-login selected" data-avatar="😺">😺</div>
+            <div class="avatar-option-login" data-avatar="🐶">🐶</div>
+            <div class="avatar-option-login" data-avatar="🦊">🦊</div>
+            <div class="avatar-option-login" data-avatar="🐼">🐼</div>
+            <div class="avatar-option-login" data-avatar="🐨">🐨</div>
+            <div class="avatar-option-login" data-avatar="🦁">🦁</div>
+            <div class="avatar-option-login" data-avatar="🐯">🐯</div>
+            <div class="avatar-option-login" data-avatar="🐸">🐸</div>
+          </div>
+        </div>
+        <button class="primary-btn" id="registerBtn">Create Account</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app" id="mainApp" style="display: none;">
+    <!-- Sidebar: Servers -->
+    <div class="sidebar server-list">
+      <div class="servers">
+        <div class="server-icon home-icon" data-server="home" title="Home">
+          <span>🏠</span>
+        </div>
+        <div class="server-divider"></div>
+        <div class="server-icon active" data-server="general" title="General">
+          <span>🐱</span>
+        </div>
+        <div class="server-icon" data-server="dev" title="Dev">
+          <span>⚙️</span>
+        </div>
+        <div class="server-icon" data-server="gaming" title="Gaming">
+          <span>🎮</span>
+        </div>
+        <div class="server-icon add-server" title="Add Server">
+          <span>+</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Channels Sidebar -->
+    <div class="sidebar channels-sidebar">
+      <div class="server-name">
+        <h3 id="serverName">General Server</h3>
+        <div class="server-settings">⚙️</div>
+      </div>
+      
+      <div class="search-bar">
+        <input type="text" id="searchMessages" placeholder="Search messages...">
+      </div>
+
+      <div class="channels-section">
+        <div class="section-header">
+          <span class="arrow">▼</span> TEXT CHANNELS
+        </div>
+        <div class="channels">
+          <div class="channel active" data-channel="general">
+            <span class="channel-icon">#</span>
+            <span class="channel-name">general</span>
+          </div>
+          <div class="channel" data-channel="random">
+            <span class="channel-icon">#</span>
+            <span class="channel-name">random</span>
+          </div>
+          <div class="channel" data-channel="dev">
+            <span class="channel-icon">#</span>
+            <span class="channel-name">dev</span>
+          </div>
+          <div class="channel" data-channel="memes">
+            <span class="channel-icon">#</span>
+            <span class="channel-name">memes</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="channels-section">
+        <div class="section-header">
+          <span class="arrow">▼</span> VOICE CHANNELS
+        </div>
+        <div class="channels">
+          <div class="voice-channel" data-channel="voice-lounge">
+            <span class="channel-icon">🔊</span>
+            <span class="channel-name">Lounge</span>
+            <span class="voice-users-count">0</span>
+          </div>
+          <div class="voice-channel" data-channel="voice-gaming">
+            <span class="channel-icon">🔊</span>
+            <span class="channel-name">Gaming</span>
+            <span class="voice-users-count">0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="user-area">
+        <div class="user-info">
+          <div class="user-avatar" id="myAvatar">
+            <div class="avatar-img">😺</div>
+            <div class="status-indicator online"></div>
+          </div>
+          <div class="user-details">
+            <div class="user-name" id="myUsername">Username</div>
+            <div class="user-status-text" id="myStatus">#0000</div>
+          </div>
+        </div>
+        <div class="user-controls">
+          <button class="icon-btn" id="editProfileBtn" title="Edit Profile">✏️</button>
+          <button class="icon-btn" id="statusBtn" title="Status">🟢</button>
+          <button class="icon-btn" id="themeBtn" title="Toggle Theme">🌙</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Chat -->
+    <div class="main">
+      <div class="header">
+        <div class="channel-info">
+          <h2 id="currentChannel"># general</h2>
+          <div class="channel-description">General discussion for everything</div>
+        </div>
+        <div class="header-controls">
+          <button class="icon-btn" id="voiceBtn" title="Voice Channel">🎙️</button>
+          <button class="icon-btn" id="toggleUsersBtn">👤</button>
+        </div>
+      </div>
+
+      <!-- Voice Call Panel -->
+      <div class="voice-panel" id="voicePanel">
+        <div class="voice-header">
+          <div class="voice-title">
+            <span class="voice-icon">🔊</span>
+            <span id="voiceChannelName">Voice Channel</span>
+          </div>
+          <button class="icon-btn danger" id="leaveVoiceBtn" title="Leave Voice">📞</button>
+        </div>
+        <div class="voice-participants" id="voiceParticipants"></div>
+        <div class="voice-controls">
+          <button class="voice-control-btn" id="muteMicBtn" title="Mute Mic">
+            <span>🎤</span>
+          </button>
+          <button class="voice-control-btn" id="deafenBtn" title="Deafen">
+            <span>🔊</span>
+          </button>
+          <button class="voice-control-btn" id="shareScreenBtn" title="Share Screen">
+            <span>🖥️</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="messages" id="messages">
+        <div class="welcome-message">
+          <h1>Welcome to #general</h1>
+          <p>This is the beginning of the #general channel.</p>
+        </div>
+      </div>
+
+      <div class="reply-indicator" id="replyIndicator" style="display: none;">
+        <div class="reply-content">
+          <div class="reply-label">Replying to <strong id="replyUsername"></strong></div>
+          <button class="reply-close" onclick="cancelReply()">×</button>
+        </div>
+        <div class="reply-preview" id="replyPreview"></div>
+      </div>
+
+      <div class="input-area">
+        <div class="input-controls">
+          <button class="icon-btn" id="gifBtnInput" title="Send GIF">🎬</button>
+          <button class="icon-btn" id="emojiBtn" title="Emoji">😊</button>
+        </div>
+        <div class="input-wrapper">
+          <input type="text" id="messageInput" placeholder="Message #general" maxlength="2000">
+        </div>
+        <button id="sendBtn" class="send-btn">
+          <span>Send</span>
+        </button>
+      </div>
+      <div class="typing-indicator" id="typingIndicator"></div>
+    </div>
+
+    <!-- User Panel -->
+    <div class="user-panel" id="userPanel">
+      <div class="panel-header">
+        <h3>Members</h3>
+        <div class="member-count" id="memberCount">0</div>
+      </div>
+      <div class="members-section">
+        <div class="role-header">ONLINE — <span id="onlineCount">0</span></div>
+        <div id="onlineUsers"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modals -->
+  <div class="modal" id="statusModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Set Status</h3>
+        <button class="modal-close" onclick="closeModal('statusModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="status-option" data-status="online">
+          <span class="status-dot online"></span> Online
+        </div>
+        <div class="status-option" data-status="away">
+          <span class="status-dot away"></span> Away
+        </div>
+        <div class="status-option" data-status="busy">
+          <span class="status-dot busy"></span> Do Not Disturb
+        </div>
+        <div class="status-option" data-status="offline">
+          <span class="status-dot offline"></span> Invisible
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="editProfileModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Edit Profile</h3>
+        <button class="modal-close" onclick="closeModal('editProfileModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" id="editUsername" class="form-input" placeholder="Your username">
+        </div>
+        <div class="form-group">
+          <label>Bio</label>
+          <textarea id="editBio" class="form-input" placeholder="Tell us about yourself..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>Avatar</label>
+          <div class="avatar-selector">
+            <div class="avatar-option">😺</div>
+            <div class="avatar-option">🐶</div>
+            <div class="avatar-option">🦊</div>
+            <div class="avatar-option">🐼</div>
+            <div class="avatar-option">🐨</div>
+            <div class="avatar-option">🦁</div>
+            <div class="avatar-option">🐯</div>
+            <div class="avatar-option">🐸</div>
+            <div class="avatar-option">🐙</div>
+            <div class="avatar-option">🦄</div>
+            <div class="avatar-option">🐲</div>
+            <div class="avatar-option">🦖</div>
+            <div class="avatar-option">🌟</div>
+            <div class="avatar-option">⚡</div>
+            <div class="avatar-option">🔥</div>
+            <div class="avatar-option">💎</div>
+          </div>
+        </div>
+        <button class="primary-btn save-btn" onclick="saveProfile()">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="reactionPickerModal">
+    <div class="modal-content reaction-picker">
+      <div class="reaction-categories">
+        <div class="reaction-category active" data-category="smileys">😊 Smileys</div>
+        <div class="reaction-category" data-category="gestures">👍 Gestures</div>
+        <div class="reaction-category" data-category="animals">🐶 Animals</div>
+        <div class="reaction-category" data-category="food">🍕 Food</div>
+        <div class="reaction-category" data-category="activities">⚽ Activities</div>
+        <div class="reaction-category" data-category="symbols">❤️ Symbols</div>
+      </div>
+      <div class="reaction-grid" id="reactionGrid"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="gifPickerModal">
+    <div class="modal-content gif-picker">
+      <div class="gif-search-header">
+        <input type="text" id="gifSearch" class="gif-search-input" placeholder="Search for GIFs...">
+        <button class="modal-close" onclick="closeModal('gifPickerModal')">×</button>
+      </div>
+      <div class="gif-categories">
+        <button class="gif-category-btn active" data-query="trending">🔥 Trending</button>
+        <button class="gif-category-btn" data-query="happy">😄 Happy</button>
+        <button class="gif-category-btn" data-query="sad">😢 Sad</button>
+        <button class="gif-category-btn" data-query="love">❤️ Love</button>
+        <button class="gif-category-btn" data-query="excited">🎉 Excited</button>
+        <button class="gif-category-btn" data-query="funny">😂 Funny</button>
+        <button class="gif-category-btn" data-query="agree">👍 Agree</button>
+        <button class="gif-category-btn" data-query="dance">💃 Dance</button>
+      </div>
+      <div class="gif-grid" id="gifGrid">
+        <div class="gif-loading">Loading GIFs...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="createServerModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Create Server</h3>
+        <button class="modal-close" onclick="closeModal('createServerModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Server Name</label>
+          <input type="text" id="newServerName" class="form-input" placeholder="My Awesome Server">
+        </div>
+        <div class="form-group">
+          <label>Server Icon</label>
+          <div class="icon-selector">
+            <div class="icon-option" data-icon="🏠">🏠</div>
+            <div class="icon-option" data-icon="🎮">🎮</div>
+            <div class="icon-option" data-icon="🎨">🎨</div>
+            <div class="icon-option" data-icon="🎵">🎵</div>
+            <div class="icon-option" data-icon="📚">📚</div>
+            <div class="icon-option" data-icon="⚽">⚽</div>
+            <div class="icon-option" data-icon="🍕">🍕</div>
+            <div class="icon-option" data-icon="🚀">🚀</div>
+          </div>
+        </div>
+        <button class="primary-btn save-btn" onclick="createServer()">Create Server</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="voiceJoinModal">
+    <div class="modal-content voice-join-dialog">
+      <div class="modal-header">
+        <h3>Join Voice Channel</h3>
+        <button class="modal-close" onclick="closeModal('voiceJoinModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="voice-join-info">
+          <p>You're about to join <strong id="joiningVoiceChannel"></strong></p>
+          <p class="voice-hint">Make sure your microphone is ready!</p>
+        </div>
+        <div class="voice-preview-controls">
+          <button class="voice-control-btn large" id="previewMicBtn">
+            <span>🎤</span>
+            <span class="btn-label">Mic On</span>
+          </button>
+          <button class="voice-control-btn large" id="previewDeafenBtn">
+            <span>🔊</span>
+            <span class="btn-label">Sound On</span>
+          </button>
+        </div>
+        <button class="primary-btn save-btn" onclick="confirmJoinVoice()">Join Voice</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
